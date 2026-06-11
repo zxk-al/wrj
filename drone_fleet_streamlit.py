@@ -9,7 +9,7 @@ DEFAULT_DRONES = 150
 SIM_STEP = 0.04
 GROUND_Z = 0
 SKY_Z = 80
-TRAIL_MAX_LEN = 80
+TRAIL_MAX_LEN = 40  # 减少轨迹点数量，降低渲染压力
 
 # ===================== 会话状态初始化 =====================
 if "drone_pos" not in st.session_state:
@@ -22,10 +22,8 @@ if "is_running" not in st.session_state:
     st.session_state.is_running = False
 if "drone_num" not in st.session_state:
     st.session_state.drone_num = DEFAULT_DRONES
-# 自定义点位（改用手动输入坐标）
 if "custom_points" not in st.session_state:
     st.session_state.custom_points = []
-# 场景障碍物（城市建筑群）
 if "obstacles" not in st.session_state:
     st.session_state.obstacles = [
         {"pos": (25, 25), "r": 7, "h": 38},
@@ -141,19 +139,14 @@ def update_flight():
         if len(st.session_state.drone_trails[i]) > TRAIL_MAX_LEN:
             st.session_state.drone_trails[i].pop(0)
 
-# ===================== 4. 高写实3D场景渲染 =====================
-def render_real_scene():
-    drone_num = st.session_state.drone_num
-    drone_pos = st.session_state.drone_pos
-    trails = st.session_state.drone_trails
-    obs = st.session_state.obstacles
-    custom_pts = st.session_state.custom_points
-
+# ===================== 4. 高写实3D场景渲染（优化版） =====================
+@st.cache_data(show_spinner=False)
+def render_real_scene(drone_num, drone_pos, trails, obs, custom_pts):
     fig = go.Figure()
 
-    # 1. 写实地面
-    gx = np.linspace(-65, 65, 25)
-    gy = np.linspace(-65, 65, 25)
+    # 1. 简化地面渲染（降低网格密度）
+    gx = np.linspace(-65, 65, 15)
+    gy = np.linspace(-65, 65, 15)
     gxx, gyy = np.meshgrid(gx, gy)
     gzz = np.zeros_like(gxx)
     fig.add_trace(go.Surface(
@@ -162,12 +155,12 @@ def render_real_scene():
         opacity=0.8, showscale=False, name="城市地面"
     ))
 
-    # 2. 建筑群
+    # 2. 简化建筑渲染（降低复杂度）
     for building in obs:
         bx, by = building["pos"]
         br = building["r"]
         bh = building["h"]
-        theta = np.linspace(0, 2 * np.pi, 24)
+        theta = np.linspace(0, 2 * np.pi, 12)
         circ_x = bx + br * np.cos(theta)
         circ_y = by + br * np.sin(theta)
         h_range = np.linspace(0, bh, 2)
@@ -189,8 +182,8 @@ def render_real_scene():
             name="自定义点位"
         ))
 
-    # 4. 无人机飞行轨迹
-    for i in range(min(drone_num, 20)):
+    # 4. 轨迹线只画前10架无人机（大幅降低渲染压力）
+    for i in range(min(drone_num, 10)):
         tr = np.array(trails[i])
         if len(tr) > 2:
             fig.add_trace(go.Scatter3d(
@@ -242,8 +235,8 @@ with st.sidebar:
     st.header("⚙️ 操作面板")
     st.divider()
 
-    # 1. 无人机数量
-    drone_cnt = st.number_input("无人机数量", min_value=1, max_value=MAX_DRONES, value=DEFAULT_DRONES, step=10)
+    # 1. 无人机数量（建议不超过300架，避免卡顿）
+    drone_cnt = st.number_input("无人机数量", min_value=1, max_value=MAX_DRONES, value=100, step=10)
     st.session_state.drone_num = drone_cnt
 
     # 2. 编队模式选择
@@ -280,10 +273,10 @@ with st.sidebar:
 
     st.divider()
     st.info("""
-    💡 使用教程：
-    1. 预设队形：选样式 → 初始化 → 开始飞行
-    2. 自定义队形：在侧边栏输入X/Y坐标 → 添加点位 → 生成编队
-    3. 无人机遇楼房会自动避让
+    💡 优化使用建议：
+    1. 无人机数量建议不超过300架，画面更流畅
+    2. 自定义点位建议控制在10个以内，避免卡顿
+    3. 启动后如果仍有频闪，按Ctrl+Shift+R强制刷新页面
     """)
 
 # 主画面容器
@@ -315,15 +308,21 @@ if btn_start:
 if btn_pause:
     st.session_state.is_running = False
 
-# 渲染画面（常驻渲染，无空白）
+# 先渲染一次画面（避免空白）
 try:
-    fig = render_real_scene()
+    fig = render_real_scene(
+        st.session_state.drone_num,
+        st.session_state.drone_pos,
+        st.session_state.drone_trails,
+        st.session_state.obstacles,
+        st.session_state.custom_points
+    )
     view_holder.plotly_chart(fig, use_container_width=True)
 except Exception as e:
     view_holder.error(f"渲染异常：{str(e)}")
 
-# 飞行循环（安全刷新）
+# 飞行循环（降低刷新频率，解决频闪）
 if st.session_state.is_running:
     update_flight()
-    time.sleep(0.08)
+    time.sleep(0.2)  # 从0.08s改成0.2s，大幅降低刷新频率
     st.rerun()

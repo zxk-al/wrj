@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
+import time
 
 # ===================== 全局配置 =====================
 MAX_DRONES = 10000
@@ -136,7 +137,7 @@ def update_flight():
         if len(st.session_state.drone_trails[i]) > 30:
             st.session_state.drone_trails[i].pop(0)
 
-# ===================== 4. 简化版3D渲染（100%能显示） =====================
+# ===================== 4. 简化版3D渲染（稳定无报错） =====================
 def render_scene():
     drone_num = st.session_state.drone_num
     drone_pos = st.session_state.drone_pos
@@ -257,14 +258,15 @@ with st.sidebar:
     else:
         btn_init = st.button("🔧 生成自定义编队", use_container_width=True)
 
-    btn_start = st.button("▶️ 开始飞行", use_container_width=True)
-    btn_pause = st.button("⏸️ 暂停飞行", use_container_width=True)
+    # 改用「步进刷新」，完全消除循环
+    btn_step = st.button("⏭️ 单步更新", use_container_width=True)
 
     st.divider()
     st.info("""
-    💡 关键说明：
-    1.  点击「初始化编队」后，**必须先点「开始飞行」，画面才会动**
-    2.  为了稳定，已大幅降低渲染压力，保证画面一定能显示
+    💡 关键使用方法：
+    1. 点击「初始化编队」生成队形
+    2. 点击「单步更新」，画面会前进一帧
+    3. 连续点击「单步更新」，无人机就会连续飞行
     """)
 
 # 主画面容器
@@ -273,12 +275,12 @@ view_holder = st.empty()
 # 状态栏
 st.divider()
 col1, col2, col3, col4 = st.columns(4)
-col1.info(f"状态：{'飞行中 🟢' if st.session_state.is_running else '已暂停 🔴'}")
+col1.info(f"状态：手动控制 🔘")
 col2.info(f"无人机：{st.session_state.drone_num} 架")
 col3.info(f"建筑：{len(st.session_state.obstacles)} 栋")
 col4.info(f"点位：{len(st.session_state.custom_points)} 个")
 
-# ===================== 核心逻辑 =====================
+# ===================== 核心逻辑（彻底移除rerun） =====================
 if btn_init:
     if mode == "预设队形":
         pos, target = gen_preset_fleet(select_shape, drone_cnt)
@@ -286,22 +288,15 @@ if btn_init:
         pos, target = gen_custom_fleet(st.session_state.custom_points, drone_cnt)
     st.session_state.drone_pos = pos
     st.session_state.drone_target = target
-    st.session_state.is_running = False
-    st.success("编队初始化完成！请点击「开始飞行」")
+    st.success("编队初始化完成！请点击「单步更新」")
 
-if btn_start:
-    st.session_state.is_running = True
-if btn_pause:
-    st.session_state.is_running = False
+# 单步更新（手动刷新，无循环、无频闪）
+if btn_step:
+    update_flight()
 
-# 【关键修改】先强制渲染一次静态画面，避免空白
+# 强制渲染当前画面（永远不会空白）
 try:
     fig = render_scene()
     view_holder.plotly_chart(fig, use_container_width=True)
 except Exception as e:
     view_holder.error(f"渲染失败：{str(e)}")
-
-# 飞行循环（降低频率，避免频闪）
-if st.session_state.is_running:
-    update_flight()
-    st.experimental_rerun()

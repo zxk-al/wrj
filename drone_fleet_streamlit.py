@@ -22,7 +22,7 @@ if "is_running" not in st.session_state:
     st.session_state.is_running = False
 if "drone_num" not in st.session_state:
     st.session_state.drone_num = DEFAULT_DRONES
-# 自定义手绘点位
+# 自定义点位（改用手动输入坐标）
 if "custom_points" not in st.session_state:
     st.session_state.custom_points = []
 # 场景障碍物（城市建筑群）
@@ -84,26 +84,21 @@ def gen_preset_fleet(shape, count):
         pos[:count, 2] = GROUND_Z
         target[:count] = pos[:count] + [0, 0, 22]
 
-    # 清空轨迹 & 手绘点
     st.session_state.drone_trails = [[] for _ in range(MAX_DRONES)]
-    st.session_state.custom_points = []
     return pos, target
 
-# ===================== 2. 手绘自定义队形生成 =====================
+# ===================== 2. 自定义队形生成 =====================
 def gen_custom_fleet(point_list, count):
-    """根据鼠标点击点位生成任意自定义编队"""
     count = min(count, MAX_DRONES)
     pos = np.zeros((MAX_DRONES, 3))
     target = np.zeros((MAX_DRONES, 3))
     point_num = len(point_list)
 
     if point_num == 0:
-        # 无手绘点，默认居中编队
         for i in range(count):
             pos[i] = [0, 0, GROUND_Z]
             target[i] = [0, 0, 30]
     else:
-        # 无人机均匀分配到手绘点位上
         for i in range(count):
             px, py = point_list[i % point_num]
             pos[i] = [px, py, GROUND_Z]
@@ -121,13 +116,11 @@ def update_flight():
         p = st.session_state.drone_pos[i]
         t = st.session_state.drone_target[i]
 
-        # 平滑向目标移动
         delta = t - p
         dist = np.linalg.norm(delta)
         if dist > 0.1:
             p += delta * SIM_STEP
 
-        # 建筑物避障
         for obs in obs_list:
             ox, oy = obs["pos"]
             or_ = obs["r"]
@@ -142,15 +135,13 @@ def update_flight():
                 p[1] += dy / (d_xy + 1e-6) * push
                 p[2] += 0.15
 
-        # 高度限制
         p[2] = np.clip(p[2], GROUND_Z, SKY_Z)
 
-        # 记录飞行轨迹
         st.session_state.drone_trails[i].append(p.copy())
         if len(st.session_state.drone_trails[i]) > TRAIL_MAX_LEN:
             st.session_state.drone_trails[i].pop(0)
 
-# ===================== 4. 高写实3D场景渲染（地面+建筑+天空） =====================
+# ===================== 4. 高写实3D场景渲染 =====================
 def render_real_scene():
     drone_num = st.session_state.drone_num
     drone_pos = st.session_state.drone_pos
@@ -160,7 +151,7 @@ def render_real_scene():
 
     fig = go.Figure()
 
-    # 1. 写实地面（网格路面效果）
+    # 1. 写实地面
     gx = np.linspace(-65, 65, 25)
     gy = np.linspace(-65, 65, 25)
     gxx, gyy = np.meshgrid(gx, gy)
@@ -171,7 +162,7 @@ def render_real_scene():
         opacity=0.8, showscale=False, name="城市地面"
     ))
 
-    # 2. 建筑群（立体楼房）
+    # 2. 建筑群
     for building in obs:
         bx, by = building["pos"]
         br = building["r"]
@@ -189,7 +180,7 @@ def render_real_scene():
             opacity=0.9, showscale=False, name="楼房"
         ))
 
-    # 3. 手绘标记点（红色标记自定义点位）
+    # 3. 自定义点位标记
     if len(custom_pts) > 0:
         pts_arr = np.array(custom_pts)
         fig.add_trace(go.Scatter3d(
@@ -198,7 +189,7 @@ def render_real_scene():
             name="自定义点位"
         ))
 
-    # 4. 无人机飞行轨迹（淡蓝色尾迹）
+    # 4. 无人机飞行轨迹
     for i in range(min(drone_num, 20)):
         tr = np.array(trails[i])
         if len(tr) > 2:
@@ -208,7 +199,7 @@ def render_real_scene():
                 showlegend=False
             ))
 
-    # 5. 无人机集群（高度渐变配色）
+    # 5. 无人机集群
     drones = drone_pos[:drone_num]
     fig.add_trace(go.Scatter3d(
         x=drones[:, 0], y=drones[:, 1], z=drones[:, 2],
@@ -223,7 +214,7 @@ def render_real_scene():
         name="无人机"
     ))
 
-    # 6. 场景全局设置（视角、光照、背景）
+    # 6. 场景设置
     fig.update_layout(
         title="🏙️ 全真城市环境 - 无人机编队仿真",
         title_font=dict(size=16, color="#f0f0f0"),
@@ -244,7 +235,7 @@ def render_real_scene():
 # ===================== 页面主体 UI =====================
 st.set_page_config(page_title="全真无人机编队系统", layout="wide")
 st.title("🏙️ 全真城市环境 · 无人机编队仿真平台")
-st.markdown("✅ 预设队形 + ✅ 鼠标手绘自定义编队 + ✅ 建筑避障 + ✅ 飞行轨迹 | 零AI训练，简单易上手")
+st.markdown("✅ 预设队形 + ✅ 坐标自定义编队 + ✅ 建筑避障 + ✅ 飞行轨迹 | 零AI训练，简单易上手")
 
 # 左侧控制面板
 with st.sidebar:
@@ -256,12 +247,25 @@ with st.sidebar:
     st.session_state.drone_num = drone_cnt
 
     # 2. 编队模式选择
-    mode = st.radio("编队模式", ["预设队形", "手绘自定义队形"])
+    mode = st.radio("编队模式", ["预设队形", "坐标自定义队形"])
 
     # 3. 预设队形选择
     preset_list = ["矩形方阵", "环形编队", "一字横队", "三角编队", "随机散点"]
     if mode == "预设队形":
         select_shape = st.selectbox("选择队形", preset_list)
+    else:
+        # 坐标输入
+        st.subheader("添加自定义点位")
+        col1, col2 = st.columns(2)
+        x_coord = col1.number_input("X坐标", min_value=-60.0, max_value=60.0, value=0.0, step=1.0)
+        y_coord = col2.number_input("Y坐标", min_value=-60.0, max_value=60.0, value=0.0, step=1.0)
+        if st.button("➕ 添加点位", use_container_width=True):
+            st.session_state.custom_points.append((x_coord, y_coord))
+            st.success(f"已添加点位 ({x_coord}, {y_coord})")
+        if st.button("🧹 清空所有点位", use_container_width=True):
+            st.session_state.custom_points = []
+            st.success("已清空所有点位")
+        st.info(f"当前已添加点位数量：{len(st.session_state.custom_points)}")
 
     st.divider()
 
@@ -269,8 +273,7 @@ with st.sidebar:
     if mode == "预设队形":
         btn_init = st.button("🔧 初始化预设编队", use_container_width=True)
     else:
-        btn_clear = st.button("🧹 清空手绘点位", use_container_width=True)
-        btn_init = st.button("🔧 生成手绘编队", use_container_width=True)
+        btn_init = st.button("🔧 生成自定义编队", use_container_width=True)
 
     btn_start = st.button("▶️ 开始飞行仿真", use_container_width=True)
     btn_pause = st.button("⏸️ 暂停飞行", use_container_width=True)
@@ -279,7 +282,7 @@ with st.sidebar:
     st.info("""
     💡 使用教程：
     1. 预设队形：选样式 → 初始化 → 开始飞行
-    2. 手绘队形：在右侧3D图**点击地面**打点 → 生成编队
+    2. 自定义队形：在侧边栏输入X/Y坐标 → 添加点位 → 生成编队
     3. 无人机遇楼房会自动避让
     """)
 
@@ -292,14 +295,9 @@ c1, c2, c3, c4 = st.columns(4)
 c1.info(f"运行状态：{'飞行中 🟢' if st.session_state.is_running else '已暂停 🔴'}")
 c2.info(f"无人机总数：{st.session_state.drone_num} 架")
 c3.info(f"建筑物数量：{len(st.session_state.obstacles)} 栋")
-c4.info(f"手绘点位：{len(st.session_state.custom_points)} 个")
+c4.info(f"自定义点位：{len(st.session_state.custom_points)} 个")
 
 # ===================== 功能逻辑执行 =====================
-# 清空手绘点
-if mode == "手绘自定义队形" and "btn_clear" in locals() and btn_clear:
-    st.session_state.custom_points = []
-    st.rerun()
-
 # 初始化编队
 if btn_init:
     if mode == "预设队形":
@@ -320,14 +318,7 @@ if btn_pause:
 # 渲染画面（常驻渲染，无空白）
 try:
     fig = render_real_scene()
-    # 绑定画布点击事件，实现手绘打点
-    click_data = view_holder.plotly_chart(fig, use_container_width=True, on_click=True)
-    if click_data and mode == "手绘自定义队形":
-        for point in click_data.points:
-            x = point["x"]
-            y = point["y"]
-            st.session_state.custom_points.append((x, y))
-            st.rerun()
+    view_holder.plotly_chart(fig, use_container_width=True)
 except Exception as e:
     view_holder.error(f"渲染异常：{str(e)}")
 

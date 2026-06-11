@@ -8,7 +8,7 @@ MAX_DRONES = 10000  # 最大支持10000架无人机
 DEFAULT_DRONES = 500
 SIM_STEP = 0.05      # 移动步长，控制飞行速度
 
-# 初始化会话状态（Streamlit 全局状态保存）
+# ===================== 初始化会话状态 =====================
 if "drone_pos" not in st.session_state:
     st.session_state.drone_pos = np.zeros((MAX_DRONES, 3))
 if "drone_target" not in st.session_state:
@@ -20,7 +20,6 @@ if "drone_num" not in st.session_state:
 
 # ===================== 编队队形生成算法 =====================
 def generate_fleet(shape: str, drone_count: int):
-    """生成不同编队队形的初始坐标 & 目标飞行坐标"""
     drone_count = min(drone_count, MAX_DRONES)
     pos = np.zeros((MAX_DRONES, 3))
     target = np.zeros((MAX_DRONES, 3))
@@ -71,13 +70,12 @@ def generate_fleet(shape: str, drone_count: int):
     return pos, target
 
 def update_position():
-    """每一帧更新无人机位置，向目标平滑移动"""
+    """更新无人机位置，向目标平滑移动"""
     num = st.session_state.drone_num
     st.session_state.drone_pos[:num] += (st.session_state.drone_target[:num] - st.session_state.drone_pos[:num]) * SIM_STEP
 
 # ===================== 可视化绘制函数 =====================
 def draw_2d_view():
-    """绘制2D平面俯视图"""
     num = st.session_state.drone_num
     x = st.session_state.drone_pos[:num, 0]
     y = st.session_state.drone_pos[:num, 1]
@@ -96,7 +94,6 @@ def draw_2d_view():
     return fig
 
 def draw_3d_view():
-    """绘制3D立体飞行画面"""
     num = st.session_state.drone_num
     x = st.session_state.drone_pos[:num, 0]
     y = st.session_state.drone_pos[:num, 1]
@@ -123,18 +120,15 @@ st.markdown("支持 **1 ~ 10000** 架无人机编队任务，2D/3D 实时可视�
 # 左侧控制面板
 with st.sidebar:
     st.header("⚙️ 任务配置")
-    # 无人机数量
     drone_count = st.number_input(
         "无人机数量", min_value=1, max_value=MAX_DRONES, value=DEFAULT_DRONES, step=10
     )
     st.session_state.drone_num = drone_count
 
-    # 队形选择
     shape_list = ["矩形方阵", "环形编队", "一字横队", "三角编队", "随机散点"]
     select_shape = st.selectbox("选择编队队形", shape_list)
 
     st.divider()
-    # 功能按钮
     btn_init = st.button("🔧 初始化编队", use_container_width=True)
     btn_start = st.button("▶️ 开始飞行仿真", use_container_width=True)
     btn_stop = st.button("⏸️ 暂停飞行", use_container_width=True)
@@ -158,19 +152,16 @@ col1, col2 = st.columns(2)
 placeholder_2d = col1.empty()
 placeholder_3d = col2.empty()
 
-# 实时仿真循环
-if st.session_state.is_running:
-    while st.session_state.is_running:
-        update_position()
-        # 刷新2D/3D画面
-        placeholder_2d.plotly_chart(draw_2d_view(), use_container_width=True)
-        placeholder_3d.plotly_chart(draw_3d_view(), use_container_width=True)
-        time.sleep(0.1)
-else:
-    # 静止状态渲染当前画面
-    placeholder_2d.plotly_chart(draw_2d_view(), use_container_width=True)
-    placeholder_3d.plotly_chart(draw_3d_view(), use_container_width=True)
+# 渲染当前画面
+placeholder_2d.plotly_chart(draw_2d_view(), use_container_width=True)
+placeholder_3d.plotly_chart(draw_3d_view(), use_container_width=True)
 
 # 底部状态信息
 st.divider()
 st.info(f"当前运行状态：{'飞行中 🟢' if st.session_state.is_running else '已暂停 🔴'} | 在线无人机：{st.session_state.drone_num} 架")
+
+# 安全的循环方式：用rerun代替while循环
+if st.session_state.is_running:
+    update_position()
+    time.sleep(0.1)
+    st.rerun()

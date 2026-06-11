@@ -22,7 +22,6 @@ if "is_running" not in st.session_state:
 if "drone_num" not in st.session_state:
     st.session_state.drone_num = DEFAULT_DRONES
 if "obstacles" not in st.session_state:
-    # 模拟城市建筑/障碍物（中心、半径、高度）
     st.session_state.obstacles = [
         {"pos": (30, 30), "r": 8, "h": 40},
         {"pos": (-20, 10), "r": 6, "h": 35},
@@ -79,7 +78,6 @@ def generate_fleet(shape: str, drone_count: int):
         pos[:drone_count, 2] = GROUND_Z
         target[:drone_count] = pos[:drone_count] + [0, 0, 22]
 
-    # 清空轨迹
     st.session_state.drone_trails = [[] for _ in range(MAX_DRONES)]
     return pos, target
 
@@ -92,13 +90,11 @@ def update_position_with_obstacles():
         pos = st.session_state.drone_pos[i]
         target = st.session_state.drone_target[i]
 
-        # 基础向目标移动
         dir_vec = target - pos
         dist = np.linalg.norm(dir_vec)
         if dist > 0.1:
             pos += dir_vec * SIM_STEP
 
-        # 障碍物规避（简单排斥力）
         for obs in obstacles:
             ox, oy = obs["pos"]
             obs_r = obs["r"]
@@ -108,30 +104,22 @@ def update_position_with_obstacles():
             dist_xy = np.sqrt(dx**2 + dy**2)
 
             if dist_xy < obs_r + 5 and pos[2] < obs_h:
-                # 水平推开 + 升高
                 push_strength = (obs_r + 5 - dist_xy) / (obs_r + 5) * 0.5
                 pos[0] += dx / (dist_xy + 1e-6) * push_strength
                 pos[1] += dy / (dist_xy + 1e-6) * push_strength
-                pos[2] += 0.2  # 快速升高越过障碍
+                pos[2] += 0.2
 
-        # 限制高度范围
         pos[2] = np.clip(pos[2], GROUND_Z, SKY_Z)
-
-        # 记录轨迹（只保留最近100个点）
         st.session_state.drone_trails[i].append(pos.copy())
         if len(st.session_state.drone_trails[i]) > 100:
             st.session_state.drone_trails[i].pop(0)
 
 # ===================== 真实环境3D渲染 =====================
-def draw_realistic_scene():
-    num = st.session_state.drone_num
-    drones = st.session_state.drone_pos[:num]
-    trails = st.session_state.drone_trails[:num]
-    obstacles = st.session_state.obstacles
-
+@st.cache_data(show_spinner=False)
+def draw_realistic_scene(drone_num, drone_pos, drone_trails, obstacles):
     fig = go.Figure()
 
-    # 1. 地面（带网格的城市地面）
+    # 地面
     ground_x = np.linspace(-60, 60, 20)
     ground_y = np.linspace(-60, 60, 20)
     gx, gy = np.meshgrid(ground_x, ground_y)
@@ -142,7 +130,7 @@ def draw_realistic_scene():
         showscale=False, opacity=0.7, name="地面"
     ))
 
-    # 2. 障碍物（建筑/塔）
+    # 障碍物
     for obs in obstacles:
         ox, oy = obs["pos"]
         r = obs["r"]
@@ -159,9 +147,9 @@ def draw_realistic_scene():
             showscale=False, opacity=0.8, name="建筑"
         ))
 
-    # 3. 无人机轨迹线
-    for i in range(num):
-        trail = np.array(trails[i])
+    # 轨迹线（优化：只画前10条轨迹，避免卡顿）
+    for i in range(min(drone_num, 10)):
+        trail = np.array(drone_trails[i])
         if len(trail) > 1:
             fig.add_trace(go.Scatter3d(
                 x=trail[:, 0], y=trail[:, 1], z=trail[:, 2],
@@ -169,7 +157,8 @@ def draw_realistic_scene():
                 showlegend=False
             ))
 
-    # 4. 无人机本体（带高度颜色渐变）
+    # 无人机本体
+    drones = drone_pos[:drone_num]
     fig.add_trace(go.Scatter3d(
         x=drones[:, 0], y=drones[:, 1], z=drones[:, 2],
         mode="markers",
@@ -183,7 +172,6 @@ def draw_realistic_scene():
         name="无人机集群"
     ))
 
-    # 5. 天空背景 + 光照感
     fig.update_layout(
         title="🛸 真实环境无人机编队仿真",
         scene=dict(
@@ -235,7 +223,7 @@ if btn_start:
 if btn_stop:
     st.session_state.is_running = False
 
-# 主视图区域
+# 主视图区域：无论什么状态都先渲染画面
 placeholder = st.empty()
 
 # 状态信息
@@ -245,12 +233,20 @@ col1.info(f"状态：{'飞行中 🟢' if st.session_state.is_running else '已�
 col2.info(f"无人机数量：{st.session_state.drone_num} 架")
 col3.info(f"障碍物数量：{len(st.session_state.obstacles)} 个")
 
+# 安全渲染逻辑
+try:
+    fig = draw_realistic_scene(
+        st.session_state.drone_num,
+        st.session_state.drone_pos,
+        st.session_state.drone_trails,
+        st.session_state.obstacles
+    )
+    placeholder.plotly_chart(fig, use_container_width=True)
+except Exception as e:
+    placeholder.error(f"画面渲染失败：{str(e)}")
+
 # 仿真循环（安全rerun方式）
 if st.session_state.is_running:
     update_position_with_obstacles()
-    placeholder.plotly_chart(draw_realistic_scene(), use_container_width=True)
     time.sleep(0.1)
     st.rerun()
-else:
-    # 静止状态渲染当前场景
-    placeholder.plotly_chart(draw_realistic_scene(), use_container_width=True)
